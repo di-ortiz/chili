@@ -107,39 +107,62 @@ async function fetchKeywordRankings(campaignId) {
  */
 async function debugApiConnection() {
   const results = {};
+  const headers = { Authorization: getBasicAuth(), "Content-Type": "application/json" };
 
-  // v3 campaigns
-  try {
-    const { data, status } = await axios.get(`${AA_V3_API}/campaigns`, {
-      headers: { Authorization: getBasicAuth() },
-    });
-    results.v3_campaigns = { status, count: (data.data || data || []).length, sample: (data.data || data || []).slice(0, 2) };
-  } catch (err) {
-    results.v3_campaigns = { error: err.response?.status, message: err.response?.data || err.message };
-  }
+  // Try various body formats for the new API
+  const attempts = [
+    {
+      name: "campaign_list",
+      body: { connector: "agencyanalytics", provider: "agencyanalytics", operation: "list", asset: "campaign" },
+    },
+    {
+      name: "campaign_read",
+      body: { connector: "agencyanalytics", provider: "agencyanalytics", operation: "read", asset: "campaign" },
+    },
+    {
+      name: "campaign_get",
+      body: { connector: "agencyanalytics", provider: "agencyanalytics", operation: "get", asset: "campaign" },
+    },
+    {
+      name: "core_list",
+      body: { connector: "core", provider: "core", operation: "list", asset: "campaign" },
+    },
+    {
+      name: "platform_list",
+      body: { connector: "platform", provider: "platform", operation: "list", asset: "campaign" },
+    },
+    {
+      name: "internal_list",
+      body: { connector: "internal", provider: "internal", operation: "list", asset: "campaign" },
+    },
+    {
+      name: "aa_list",
+      body: { connector: "aa", provider: "aa", operation: "list", asset: "campaign" },
+    },
+    {
+      name: "user_list",
+      body: { connector: "agencyanalytics", provider: "agencyanalytics", operation: "list", asset: "user" },
+    },
+    {
+      name: "campaign_index",
+      body: { connector: "agencyanalytics", provider: "agencyanalytics", operation: "index", asset: "campaign" },
+    },
+  ];
 
-  // New API - asset format
-  try {
-    const { data, status } = await axios.post(
-      AA_NEW_API,
-      { asset: "campaign" },
-      { headers: { Authorization: getBasicAuth(), "Content-Type": "application/json" } }
-    );
-    results.new_api_asset = { status, data: typeof data === "object" ? data : "non-object" };
-  } catch (err) {
-    results.new_api_asset = { error: err.response?.status, message: err.response?.data || err.message };
-  }
-
-  // New API - with fields
-  try {
-    const { data, status } = await axios.post(
-      AA_NEW_API,
-      { asset: "campaign", fields: ["id", "company", "url"] },
-      { headers: { Authorization: getBasicAuth(), "Content-Type": "application/json" } }
-    );
-    results.new_api_with_fields = { status, data: typeof data === "object" ? data : "non-object" };
-  } catch (err) {
-    results.new_api_with_fields = { error: err.response?.status, message: err.response?.data || err.message };
+  for (const attempt of attempts) {
+    try {
+      const { data, status } = await axios.post(AA_NEW_API, attempt.body, { headers });
+      results[attempt.name] = {
+        status,
+        success: true,
+        sample: JSON.stringify(data).slice(0, 300),
+      };
+    } catch (err) {
+      results[attempt.name] = {
+        error: err.response?.status,
+        message: err.response?.data?.results?.messages || err.response?.data || err.message,
+      };
+    }
   }
 
   return results;
