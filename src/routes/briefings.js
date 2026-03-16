@@ -70,6 +70,7 @@ router.post("/:leader_id/generate", async (req, res) => {
       briefing: text,
       tasks: collectedData.tasks.length,
       events: collectedData.events.length,
+      clients_with_performance: collectedData.performance.length,
       delivered: { whatsapp: whatsappSent },
     });
   } catch (err) {

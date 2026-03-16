@@ -1,6 +1,7 @@
 const supabase = require("../db/supabase");
 const { fetchTasks } = require("./clickup");
 const { fetchEvents } = require("./gcal");
+const { fetchPerformanceForAccounts } = require("./agencyanalytics");
 
 /**
  * Collect all briefing data for a given leader.
@@ -9,10 +10,10 @@ const { fetchEvents } = require("./gcal");
  * @returns {Promise<{ tasks: Array, events: Array, leader: object }>}
  */
 async function collectDataForLeader(leader) {
-  // Get the leader's active accounts to find ClickUp list IDs
+  // Get the leader's active accounts
   const { data: accounts, error } = await supabase
     .from("accounts")
-    .select("clickup_list_id")
+    .select("*")
     .eq("leader_id", leader.id)
     .eq("active", true);
 
@@ -22,17 +23,20 @@ async function collectDataForLeader(leader) {
     .map((a) => a.clickup_list_id)
     .filter(Boolean);
 
-  // Fetch ClickUp tasks and Google Calendar events in parallel
-  const [tasks, events] = await Promise.all([
+  // Fetch ClickUp tasks, Google Calendar events, and AA performance in parallel
+  const [tasks, events, performance] = await Promise.all([
     listIds.length > 0 && leader.clickup_user_id
       ? fetchTasks(listIds, leader.clickup_user_id)
       : Promise.resolve([]),
     leader.email
       ? fetchEvents(leader.email)
       : Promise.resolve([]),
+    process.env.AGENCYANALYTICS_API_KEY
+      ? fetchPerformanceForAccounts(accounts)
+      : Promise.resolve([]),
   ]);
 
-  return { tasks, events, leader };
+  return { tasks, events, performance, leader };
 }
 
 module.exports = { collectDataForLeader };

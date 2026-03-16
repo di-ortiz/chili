@@ -3,9 +3,15 @@ const supabase = require("../db/supabase");
 
 const client = new Anthropic();
 
-const SYSTEM_PROMPT = `You are Chili Pulse, the daily briefing assistant for Chili Digital account managers. Be concise, direct, and action-oriented. Write in the leader's language based on their BU: BR = Portuguese, PA_MX = Spanish, INT = English. Format for WhatsApp: use *bold* for urgency, emojis sparingly, max 300 words.`;
+const SYSTEM_PROMPT = `You are Chili Pulse, the daily briefing assistant for Chili Digital account managers. Be concise, direct, and action-oriented. Write in the leader's language based on their BU: BR = Portuguese, PA_MX = Spanish, INT = English. Format for WhatsApp: use *bold* for urgency, emojis sparingly, max 400 words.
 
-function buildUserPrompt({ leader, tasks, events }) {
+When performance data is provided, include a brief PERFORMANCE section highlighting:
+- Clients with significant ranking improvements (celebrate wins)
+- Clients with ranking drops (flag for attention, especially escalation-tier)
+- Top keyword movements worth noting
+Keep performance insights actionable — suggest what the leader should do about drops.`;
+
+function buildUserPrompt({ leader, tasks, events, performance }) {
   const taskSummary =
     tasks.length > 0
       ? tasks
@@ -26,6 +32,25 @@ function buildUserPrompt({ leader, tasks, events }) {
           .join("\n")
       : "No meetings today.";
 
+  const perfSummary =
+    performance && performance.length > 0
+      ? performance
+          .map((p) => {
+            let summary = `- ${p.client_name} (${p.tier}) | Keywords: ${p.total_keywords} | Improved: ${p.improved} | Declined: ${p.declined}`;
+            if (p.top_changes.length > 0) {
+              const changes = p.top_changes
+                .map(
+                  (c) =>
+                    `  "${c.keyword}": ${c.previous_rank} → ${c.rank} (${c.change > 0 ? "+" : ""}${c.change})`
+                )
+                .join("\n");
+              summary += `\n${changes}`;
+            }
+            return summary;
+          })
+          .join("\n")
+      : "No performance data available.";
+
   return `Generate today's briefing for ${leader.name}, ${leader.bu} team leader.
 
 OVERDUE/URGENT TASKS:
@@ -34,7 +59,10 @@ ${taskSummary}
 TODAY'S MEETINGS:
 ${eventSummary}
 
-Prioritize escalation-tier accounts. End with one clear top action for the day.`;
+CLIENT PERFORMANCE (from AgencyAnalytics):
+${perfSummary}
+
+Prioritize escalation-tier accounts. Include performance highlights and concerns. End with one clear top action for the day.`;
 }
 
 /**
