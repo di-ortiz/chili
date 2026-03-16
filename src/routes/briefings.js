@@ -1,6 +1,7 @@
 const { Router } = require("express");
 const supabase = require("../db/supabase");
 const { collectDataForLeader } = require("../collectors/pulse-collector");
+const { generateBriefing } = require("../collectors/pulse-brain");
 
 const router = Router();
 
@@ -35,6 +36,29 @@ router.post("/:leader_id/collect", async (req, res) => {
   try {
     const result = await collectDataForLeader(leader);
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /briefings/:leader_id/generate - Collect data + generate briefing via Claude
+router.post("/:leader_id/generate", async (req, res) => {
+  const { leader_id } = req.params;
+
+  const { data: leader, error } = await supabase
+    .from("team_leaders")
+    .select("*")
+    .eq("id", leader_id)
+    .single();
+
+  if (error || !leader) {
+    return res.status(404).json({ error: "Leader not found" });
+  }
+
+  try {
+    const collectedData = await collectDataForLeader(leader);
+    const briefing = await generateBriefing(collectedData);
+    res.json({ briefing, tasks: collectedData.tasks.length, events: collectedData.events.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
