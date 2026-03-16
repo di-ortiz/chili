@@ -1,5 +1,6 @@
 const { Router } = require("express");
 const supabase = require("../db/supabase");
+const { collectDataForLeader } = require("../collectors/pulse-collector");
 
 const router = Router();
 
@@ -15,6 +16,28 @@ router.get("/:leader_id", async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
+});
+
+// POST /briefings/:leader_id/collect - Collect fresh data for a leader
+router.post("/:leader_id/collect", async (req, res) => {
+  const { leader_id } = req.params;
+
+  const { data: leader, error } = await supabase
+    .from("team_leaders")
+    .select("*")
+    .eq("id", leader_id)
+    .single();
+
+  if (error || !leader) {
+    return res.status(404).json({ error: "Leader not found" });
+  }
+
+  try {
+    const result = await collectDataForLeader(leader);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 module.exports = router;
