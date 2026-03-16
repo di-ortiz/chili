@@ -6,6 +6,7 @@ const leadersRouter = require("./routes/leaders");
 const accountsRouter = require("./routes/accounts");
 const briefingsRouter = require("./routes/briefings");
 const adminRouter = require("./routes/admin");
+const testRouter = require("./routes/test");
 const scheduler = require("./scheduler");
 
 const app = express();
@@ -24,6 +25,7 @@ app.use("/leaders", leadersRouter);
 app.use("/accounts", accountsRouter);
 app.use("/briefings", briefingsRouter);
 app.use("/admin", adminRouter);
+app.use("/test", testRouter);
 
 app.listen(PORT, () => {
   console.log(`chili-pulse running on port ${PORT}`);
