@@ -2,6 +2,7 @@ const { Router } = require("express");
 const supabase = require("../db/supabase");
 const { collectDataForLeader } = require("../collectors/pulse-collector");
 const { generateBriefing } = require("../collectors/pulse-brain");
+const { sendWhatsAppBriefing } = require("../collectors/pulse-delivery");
 
 const router = Router();
 
@@ -57,8 +58,20 @@ router.post("/:leader_id/generate", async (req, res) => {
 
   try {
     const collectedData = await collectDataForLeader(leader);
-    const briefing = await generateBriefing(collectedData);
-    res.json({ briefing, tasks: collectedData.tasks.length, events: collectedData.events.length });
+    const { text, logId } = await generateBriefing(collectedData);
+
+    // Send via WhatsApp if leader has a number and channel enabled
+    let whatsappSent = false;
+    if (leader.whatsapp && leader.channels === "whatsapp") {
+      whatsappSent = await sendWhatsAppBriefing(leader.whatsapp, text, logId);
+    }
+
+    res.json({
+      briefing: text,
+      tasks: collectedData.tasks.length,
+      events: collectedData.events.length,
+      delivered: { whatsapp: whatsappSent },
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

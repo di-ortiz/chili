@@ -60,17 +60,21 @@ async function generateBriefing(collectedData) {
     .join("\n");
 
   // Log to briefing_logs
-  const { error } = await supabase.from("briefing_logs").insert({
-    leader_id: collectedData.leader.id,
-    content: briefingText,
-    status: "generated",
-  });
+  const { data: logEntry, error } = await supabase
+    .from("briefing_logs")
+    .insert({
+      leader_id: collectedData.leader.id,
+      content: briefingText,
+      status: "generated",
+    })
+    .select("id")
+    .single();
 
   if (error) {
     console.error("Failed to log briefing:", error.message);
   }
 
-  return briefingText;
+  return { text: briefingText, logId: logEntry?.id || null };
 }
 
 module.exports = { generateBriefing };
