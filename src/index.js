@@ -5,6 +5,8 @@ const cors = require("cors");
 const leadersRouter = require("./routes/leaders");
 const accountsRouter = require("./routes/accounts");
 const briefingsRouter = require("./routes/briefings");
+const adminRouter = require("./routes/admin");
+const scheduler = require("./scheduler");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -21,7 +23,9 @@ app.get("/health", (_req, res) => {
 app.use("/leaders", leadersRouter);
 app.use("/accounts", accountsRouter);
 app.use("/briefings", briefingsRouter);
+app.use("/admin", adminRouter);
 
 app.listen(PORT, () => {
   console.log(`chili-pulse running on port ${PORT}`);
+  scheduler.start();
 });

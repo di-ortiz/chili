@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chili Pulse Admin</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; padding: 24px; }
+    h1 { color: #ff6b35; margin-bottom: 8px; }
+    h2 { color: #ff6b35; margin: 32px 0 12px; font-size: 1.2em; }
+    .subtitle { color: #888; margin-bottom: 24px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #2a2d35; }
+    th { background: #1a1d25; color: #ff6b35; font-weight: 600; }
+    tr:hover { background: #1a1d25; }
+    button { background: #ff6b35; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.85em; }
+    button:hover { background: #e55a2b; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-sm { padding: 4px 10px; font-size: 0.8em; }
+    .btn-danger { background: #dc3545; }
+    .btn-success { background: #28a745; }
+    .toggle { cursor: pointer; }
+    form { background: #1a1d25; padding: 20px; border-radius: 8px; margin-bottom: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    form.three-col { grid-template-columns: 1fr 1fr 1fr; }
+    label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85em; color: #aaa; }
+    input, select { background: #0f1117; border: 1px solid #2a2d35; color: #e0e0e0; padding: 8px; border-radius: 4px; font-size: 0.9em; }
+    .full-width { grid-column: 1 / -1; }
+    .status { padding: 2px 8px; border-radius: 4px; font-size: 0.8em; }
+    .status-active { background: #28a74533; color: #28a745; }
+    .status-inactive { background: #dc354533; color: #dc3545; }
+    .flash { position: fixed; top: 16px; right: 16px; padding: 12px 20px; border-radius: 6px; color: #fff; font-size: 0.9em; z-index: 100; }
+    .flash-success { background: #28a745; }
+    .flash-error { background: #dc3545; }
+    #accounts-section { margin-top: 40px; }
+  </style>
+</head>
+<body>
+  <h1>Chili Pulse</h1>
+  <p class="subtitle">Admin Dashboard</p>
+
+  <!-- Leaders Table -->
+  <h2>Team Leaders</h2>
+  <table id="leaders-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>BU</th>
+        <th>Services</th>
+        <th>Frequency</th>
+        <th>Last Briefing</th>
+        <th>Active</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <!-- Add Leader Form -->
+  <h2>Add Leader</h2>
+  <form id="leader-form">
+    <label>Name <input type="text" name="name" required></label>
+    <label>Email <input type="email" name="email" required></label>
+    <label>WhatsApp <input type="text" name="whatsapp" placeholder="+5511999999999"></label>
+    <label>ClickUp User ID <input type="text" name="clickup_user_id" placeholder="Optional"></label>
+    <label>BU
+      <select name="bu" required>
+        <option value="BR">BR</option>
+        <option value="INT">INT</option>
+        <option value="PA_MX">PA_MX</option>
+      </select>
+    </label>
+    <label>Services
+      <select name="services" required>
+        <option value="SEO">SEO</option>
+        <option value="PPC">PPC</option>
+        <option value="BOTH">BOTH</option>
+      </select>
+    </label>
+    <label>Frequency
+      <select name="frequency">
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+      </select>
+    </label>
+    <label>Channel
+      <select name="channels">
+        <option value="whatsapp">WhatsApp</option>
+        <option value="email">Email</option>
+        <option value="gchat">Google Chat</option>
+      </select>
+    </label>
+    <div class="full-width">
+      <button type="submit">Add Leader</button>
+    </div>
+  </form>
+
+  <!-- Accounts Section -->
+  <div id="accounts-section">
+    <h2>Accounts</h2>
+    <table id="accounts-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Client</th>
+          <th>Tier</th>
+          <th>BU</th>
+          <th>Leader</th>
+          <th>Active</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <h2>Add Account</h2>
+    <form id="account-form" class="three-col">
+      <label>Account Name <input type="text" name="name" required></label>
+      <label>Client Name <input type="text" name="client_name" required></label>
+      <label>ClickUp List ID <input type="text" name="clickup_list_id"></label>
+      <label>Service Type <input type="text" name="service_type" placeholder="SEO, PPC, etc."></label>
+      <label>Tier
+        <select name="tier" required>
+          <option value="smb">SMB</option>
+          <option value="enterprise">Enterprise</option>
+          <option value="honeymoon">Honeymoon</option>
+          <option value="escalation">Escalation</option>
+        </select>
+      </label>
+      <label>BU
+        <select name="bu" required>
+          <option value="BR">BR</option>
+          <option value="INT">INT</option>
+          <option value="PA_MX">PA_MX</option>
+        </select>
+      </label>
+      <label>Leader
+        <select name="leader_id" id="leader-select" required>
+          <option value="">Select leader...</option>
+        </select>
+      </label>
+      <div class="full-width">
+        <button type="submit">Add Account</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const API = window.location.origin;
+    let leadersCache = [];
+
+    function flash(msg, type = "success") {
+      const el = document.createElement("div");
+      el.className = `flash flash-${type}`;
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 3000);
+    }
+
+    async function api(path, opts = {}) {
+      const res = await fetch(`${API}${path}`, {
+        headers: { "Content-Type": "application/json" },
+        ...opts,
+      });
+      return res.json();
+    }
+
+    // --- Leaders ---
+    async function loadLeaders() {
+      const leaders = await api("/leaders");
+      leadersCache = leaders;
+      const tbody = document.querySelector("#leaders-table tbody");
+      tbody.innerHTML = "";
+
+      // Fetch last briefing dates
+      const briefingDates = {};
+      for (const l of leaders) {
+        const logs = await api(`/briefings/${l.id}`);
+        briefingDates[l.id] = logs.length > 0 ? logs[0].generated_at : null;
+      }
+
+      for (const l of leaders) {
+        const lastBriefing = briefingDates[l.id]
+          ? new Date(briefingDates[l.id]).toLocaleString()
+          : "Never";
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${l.name}</td>
+          <td>${l.bu}</td>
+          <td>${l.services}</td>
+          <td>${l.frequency}</td>
+          <td>${lastBriefing}</td>
+          <td>
+            <span class="status ${l.active ? "status-active" : "status-inactive"}">${l.active ? "Active" : "Inactive"}</span>
+          </td>
+          <td>
+            <button class="btn-sm" onclick="sendNow('${l.id}', this)">Send now</button>
+            <button class="btn-sm ${l.active ? "btn-danger" : "btn-success"}" onclick="toggleActive('${l.id}', ${!l.active})">${l.active ? "Disable" : "Enable"}</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+
+      // Update leader dropdown in account form
+      const select = document.getElementById("leader-select");
+      select.innerHTML = '<option value="">Select leader...</option>';
+      for (const l of leaders) {
+        select.innerHTML += `<option value="${l.id}">${l.name} (${l.bu})</option>`;
+      }
+    }
+
+    async function sendNow(leaderId, btn) {
+      btn.disabled = true;
+      btn.textContent = "Sending...";
+      try {
+        const result = await api(`/briefings/${leaderId}/generate`, { method: "POST" });
+        if (result.error) throw new Error(result.error);
+        flash(`Briefing sent! (${result.tasks} tasks, ${result.events} events)`);
+        loadLeaders();
+      } catch (err) {
+        flash(err.message, "error");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Send now";
+      }
+    }
+
+    async function toggleActive(leaderId, active) {
+      await fetch(`${API}/leaders/${leaderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active }),
+      });
+      loadLeaders();
+    }
+
+    document.getElementById("leader-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const form = new FormData(e.target);
+      const body = Object.fromEntries(form);
+      const result = await api("/leaders", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      if (result.error) return flash(result.error, "error");
+      flash(`Leader ${result.name} added!`);
+      e.target.reset();
+      loadLeaders();
+    });
+
+    // --- Accounts ---
+    async function loadAccounts() {
+      const accounts = await api("/accounts");
+      const tbody = document.querySelector("#accounts-table tbody");
+      tbody.innerHTML = "";
+      for (const a of accounts) {
+        const leaderName = a.team_leaders?.name || "—";
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${a.name}</td>
+          <td>${a.client_name}</td>
+          <td>${a.tier}</td>
+          <td>${a.bu}</td>
+          <td>${leaderName}</td>
+          <td><span class="status ${a.active ? "status-active" : "status-inactive"}">${a.active ? "Active" : "Inactive"}</span></td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    document.getElementById("account-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const form = new FormData(e.target);
+      const body = Object.fromEntries(form);
+      const result = await api("/accounts", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      if (result.error) return flash(result.error, "error");
+      flash(`Account ${result.name} added!`);
+      e.target.reset();
+      loadAccounts();
+    });
+
+    // Init
+    loadLeaders();
+    loadAccounts();
+  </script>
+</body>
+</html>

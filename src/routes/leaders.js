@@ -32,4 +32,20 @@ router.post("/", async (req, res) => {
   res.status(201).json(data);
 });
 
+// PATCH /leaders/:id - Update a team leader
+router.patch("/:id", async (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+
+  const { data, error } = await supabase
+    .from("team_leaders")
+    .update(updates)
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
 module.exports = router;
