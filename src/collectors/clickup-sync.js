@@ -12,14 +12,59 @@ function getClient() {
   });
 }
 
+// Only sync lists from these project folders (active client work)
+const PROJECT_FOLDERS = [
+  "(Brazil) Projects",
+  "(Panama) Projects",
+  "(Panama INT) Projects",
+  "(Mexico) Projects",
+];
+
+// Map folder names to BU codes
+function folderToBU(folderName) {
+  if (!folderName) return "INT";
+  if (folderName.includes("Brazil")) return "BR";
+  if (folderName.includes("Panama INT")) return "INT";
+  if (folderName.includes("Panama")) return "PA_MX";
+  if (folderName.includes("Mexico")) return "PA_MX";
+  return "INT";
+}
+
+// Extract service type and client name from list name
+// e.g. "SEO - Daikin" → { service: "SEO", client: "Daikin" }
+// e.g. "PPC - sicoob.com.br" → { service: "PPC", client: "sicoob.com.br" }
+function parseListName(name) {
+  const prefixes = [
+    "SEO/AEO", "SEO", "PPC", "SEM", "SMM", "CRO",
+    "BKLinks", "EDM", "LP", "Social", "WEB", "WIKIPEDIA",
+    "SEARCH", "PPC SEARCH", "Site",
+  ];
+
+  for (const prefix of prefixes) {
+    const pattern = new RegExp(`^${prefix.replace("/", "/")}\\s*-\\s*(.+)$`, "i");
+    const match = name.match(pattern);
+    if (match) {
+      const client = match[1].trim();
+      // Map service prefix to our service types
+      let service = prefix.toUpperCase();
+      if (["SEM", "PPC SEARCH", "SEARCH"].includes(service)) service = "PPC";
+      if (["SEO/AEO"].includes(service)) service = "SEO";
+      if (["BKLINKS", "EDM", "LP", "SOCIAL", "WEB", "SMM", "WIKIPEDIA", "CRO", "SITE"].includes(service)) {
+        service = "SEO"; // group ancillary services under SEO
+      }
+      return { service, client };
+    }
+  }
+
+  return { service: null, client: name };
+}
+
 /**
  * Fetch the full ClickUp workspace structure: teams → spaces → folders → lists.
- * Each list becomes an "account" in our system.
  */
 async function fetchWorkspaceStructure() {
   const client = getClient();
 
-  // Step 1: Get teams (workspaces)
   const { data: teamsData } = await client.get("/team");
   const teams = teamsData.teams || [];
 
@@ -27,7 +72,6 @@ async function fetchWorkspaceStructure() {
   const allMembers = [];
 
   for (const team of teams) {
-    // Collect workspace members
     for (const member of team.members || []) {
       const u = member.user || member;
       allMembers.push({
@@ -38,19 +82,16 @@ async function fetchWorkspaceStructure() {
       });
     }
 
-    // Step 2: Get spaces
     const { data: spacesData } = await client.get(`/team/${team.id}/space`, {
       params: { archived: false },
     });
 
     for (const space of spacesData.spaces || []) {
-      // Step 3: Get folders in each space
       const { data: foldersData } = await client.get(`/space/${space.id}/folder`, {
         params: { archived: false },
       });
 
       for (const folder of foldersData.folders || []) {
-        // Step 4: Get lists in each folder
         const { data: listsData } = await client.get(`/folder/${folder.id}/list`, {
           params: { archived: false },
         });
@@ -66,7 +107,6 @@ async function fetchWorkspaceStructure() {
         }
       }
 
-      // Also get folderless lists in the space
       const { data: folderlessData } = await client.get(`/space/${space.id}/list`, {
         params: { archived: false },
       });
@@ -83,28 +123,44 @@ async function fetchWorkspaceStructure() {
     }
   }
 
-  // Dedupe members by id
   const uniqueMembers = [...new Map(allMembers.map((m) => [m.id, m])).values()];
-
   return { lists: allLists, members: uniqueMembers };
 }
 
 /**
- * Sync ClickUp lists into the accounts table.
- * - Inserts new lists as accounts
- * - Updates existing accounts (matched by clickup_list_id)
- * - Uses folder_name as client_name if available
+ * Filter lists to only active client project lists.
+ */
+function filterProjectLists(lists) {
+  return lists.filter((list) => {
+    // Must be in a recognized project folder
+    if (!list.folder_name) return false;
+    if (!PROJECT_FOLDERS.includes(list.folder_name)) return false;
+    // Skip generic "List" names with 0 tasks
+    if (list.name === "List" && list.task_count === 0) return false;
+    return true;
+  });
+}
+
+/**
+ * Sync ClickUp project lists into the accounts table.
+ * Only syncs lists from active project folders (Brazil/Panama/INT).
+ * Extracts service type (SEO/PPC) and client name from list names.
  */
 async function syncClickUpToAccounts() {
   const { lists, members } = await fetchWorkspaceStructure();
+  const projectLists = filterProjectLists(lists);
 
-  console.log(`[clickup-sync] Found ${lists.length} lists, ${members.length} members`);
+  console.log(`[clickup-sync] Found ${lists.length} total lists, ${projectLists.length} client project lists, ${members.length} members`);
 
   let created = 0;
   let updated = 0;
   let skipped = 0;
+  const synced = [];
 
-  for (const list of lists) {
+  for (const list of projectLists) {
+    const { service, client } = parseListName(list.name);
+    const bu = folderToBU(list.folder_name);
+
     // Check if account already exists
     const { data: existing } = await supabase
       .from("accounts")
@@ -112,39 +168,40 @@ async function syncClickUpToAccounts() {
       .eq("clickup_list_id", list.clickup_list_id)
       .single();
 
+    const accountData = {
+      name: list.name,
+      client_name: client,
+      clickup_list_id: list.clickup_list_id,
+      service_type: service,
+      bu,
+      active: true,
+    };
+
     if (existing) {
-      // Update name if changed
       await supabase
         .from("accounts")
-        .update({ name: list.name })
+        .update(accountData)
         .eq("id", existing.id);
       updated++;
+      synced.push({ ...accountData, action: "updated" });
     } else {
-      // Insert new account
-      // Use folder name as client_name (folders typically represent clients)
-      const clientName = list.folder_name || list.space_name || list.name;
-
       const { error } = await supabase.from("accounts").insert({
-        name: list.name,
-        client_name: clientName,
-        clickup_list_id: list.clickup_list_id,
-        service_type: null,
-        tier: "smb", // default, admin can update later
-        bu: "INT", // default, admin can update later
+        ...accountData,
+        tier: "smb",
         leader_id: null,
-        active: true,
       });
 
       if (error) {
-        // leader_id is NOT NULL, so we need to handle accounts without a leader
+        console.error(`[clickup-sync] Failed to insert ${list.name}:`, error.message);
         skipped++;
       } else {
         created++;
+        synced.push({ ...accountData, action: "created" });
       }
     }
   }
 
-  return { total: lists.length, created, updated, skipped, members };
+  return { total: projectLists.length, created, updated, skipped, members, synced };
 }
 
 module.exports = { fetchWorkspaceStructure, syncClickUpToAccounts };
