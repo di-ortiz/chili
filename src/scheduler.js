@@ -3,6 +3,7 @@ const supabase = require("./db/supabase");
 const { collectDataForLeader } = require("./collectors/pulse-collector");
 const { generateBriefing } = require("./collectors/pulse-brain");
 const { sendWhatsAppBriefing } = require("./collectors/pulse-delivery");
+const { syncClickUpToAccounts } = require("./collectors/clickup-sync");
 
 async function processLeader(leader) {
   try {
@@ -40,6 +41,17 @@ async function runBriefings(filter) {
 }
 
 function start() {
+  // Daily at 6:00am BRT (09:00 UTC) — sync ClickUp accounts before briefings
+  cron.schedule("0 9 * * *", async () => {
+    console.log("[scheduler] Daily ClickUp sync started");
+    try {
+      const result = await syncClickUpToAccounts();
+      console.log(`[scheduler] ClickUp sync done: ${result.created} created, ${result.updated} updated, ${result.skipped} skipped`);
+    } catch (err) {
+      console.error("[scheduler] ClickUp sync failed:", err.message);
+    }
+  });
+
   // Daily at 7:30am BRT (10:30 UTC) — for daily leaders
   cron.schedule("30 10 * * *", () => {
     console.log("[scheduler] Daily briefing run started");
