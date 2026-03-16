@@ -1,52 +1,152 @@
 const axios = require("axios");
 
-const AA_API_URL = "https://apirequest.app/query";
+// Try both the new API and legacy v3
+const AA_NEW_API = "https://apirequest.app/query";
+const AA_V3_API = "https://api.clientseoreport.com/v3";
 
-function getAuthHeader() {
+function getApiKey() {
   const apiKey = process.env.AGENCYANALYTICS_API_KEY;
   if (!apiKey) throw new Error("Missing AGENCYANALYTICS_API_KEY env var");
-  // Basic auth: no username, API key as password → base64(":apikey")
-  const encoded = Buffer.from(`:${apiKey}`).toString("base64");
+  return apiKey;
+}
+
+function getBasicAuth() {
+  const encoded = Buffer.from(`:${getApiKey()}`).toString("base64");
   return `Basic ${encoded}`;
 }
 
 /**
- * Run a query against the AgencyAnalytics API.
- */
-async function aaQuery(asset, filters = {}, fields = []) {
-  const { data } = await axios.post(
-    AA_API_URL,
-    { asset, filters, fields },
-    { headers: { Authorization: getAuthHeader(), "Content-Type": "application/json" } }
-  );
-  return data;
-}
-
-/**
- * Fetch all campaigns (clients) from AgencyAnalytics.
+ * Try the legacy v3 REST API first, fall back to new query API.
  */
 async function fetchCampaigns() {
-  const data = await aaQuery("campaign", {}, ["id", "company", "url", "date_created"]);
-  return data.data || data || [];
+  // Try v3 API first: GET /campaigns
+  try {
+    const { data } = await axios.get(`${AA_V3_API}/campaigns`, {
+      headers: { Authorization: getBasicAuth() },
+    });
+    const campaigns = data.data || data.campaigns || data || [];
+    if (Array.isArray(campaigns) && campaigns.length > 0) {
+      console.log(`[agencyanalytics] v3 API returned ${campaigns.length} campaigns`);
+      return campaigns;
+    }
+  } catch (err) {
+    console.log(`[agencyanalytics] v3 API failed: ${err.response?.status || err.message}`);
+  }
+
+  // Try new query API
+  try {
+    const { data } = await axios.post(
+      AA_NEW_API,
+      { asset: "campaign" },
+      { headers: { Authorization: getBasicAuth(), "Content-Type": "application/json" } }
+    );
+    const campaigns = data.data || data || [];
+    if (Array.isArray(campaigns)) {
+      console.log(`[agencyanalytics] New API returned ${campaigns.length} campaigns`);
+      return campaigns;
+    }
+  } catch (err) {
+    console.log(`[agencyanalytics] New API failed: ${err.response?.status || err.message}`);
+  }
+
+  // Try new API with different body formats
+  const formats = [
+    { query: "campaign" },
+    { model: "campaign" },
+    { type: "campaign", action: "list" },
+  ];
+
+  for (const body of formats) {
+    try {
+      const { data } = await axios.post(AA_NEW_API, body, {
+        headers: { Authorization: getBasicAuth(), "Content-Type": "application/json" },
+      });
+      const campaigns = data.data || data || [];
+      if (Array.isArray(campaigns) && campaigns.length > 0) {
+        console.log(`[agencyanalytics] Format ${JSON.stringify(body)} worked: ${campaigns.length} campaigns`);
+        return campaigns;
+      }
+    } catch (err) {
+      // continue trying
+    }
+  }
+
+  throw new Error("All AgencyAnalytics API formats failed. Check your API key and plan.");
 }
 
 /**
  * Fetch keyword rankings for a specific campaign.
  */
 async function fetchKeywordRankings(campaignId) {
-  const data = await aaQuery(
-    "keyword-rankings",
-    { campaign_id: campaignId },
-    ["keyword_phrase", "rank", "previous_rank", "search_engine", "date"]
-  );
-  return data.data || data || [];
+  // Try v3 first
+  try {
+    const { data } = await axios.get(`${AA_V3_API}/campaigns/${campaignId}/keyword-rankings`, {
+      headers: { Authorization: getBasicAuth() },
+    });
+    return data.data || data || [];
+  } catch (err) {
+    console.log(`[agencyanalytics] v3 keyword-rankings failed: ${err.response?.status}`);
+  }
+
+  // Try new API
+  try {
+    const { data } = await axios.post(
+      AA_NEW_API,
+      { asset: "keyword-rankings", filters: { campaign_id: campaignId } },
+      { headers: { Authorization: getBasicAuth(), "Content-Type": "application/json" } }
+    );
+    return data.data || data || [];
+  } catch (err) {
+    console.log(`[agencyanalytics] New API keyword-rankings failed: ${err.response?.status}`);
+    return [];
+  }
 }
 
 /**
- * Match accounts to AA campaigns by approximate name and fetch performance data.
- *
- * @param {Array} accounts - Account rows from Supabase (with client_name)
- * @returns {Promise<Array>} Performance summaries per matched account
+ * Debug endpoint: try all API formats and return what works.
+ */
+async function debugApiConnection() {
+  const results = {};
+
+  // v3 campaigns
+  try {
+    const { data, status } = await axios.get(`${AA_V3_API}/campaigns`, {
+      headers: { Authorization: getBasicAuth() },
+    });
+    results.v3_campaigns = { status, count: (data.data || data || []).length, sample: (data.data || data || []).slice(0, 2) };
+  } catch (err) {
+    results.v3_campaigns = { error: err.response?.status, message: err.response?.data || err.message };
+  }
+
+  // New API - asset format
+  try {
+    const { data, status } = await axios.post(
+      AA_NEW_API,
+      { asset: "campaign" },
+      { headers: { Authorization: getBasicAuth(), "Content-Type": "application/json" } }
+    );
+    results.new_api_asset = { status, data: typeof data === "object" ? data : "non-object" };
+  } catch (err) {
+    results.new_api_asset = { error: err.response?.status, message: err.response?.data || err.message };
+  }
+
+  // New API - with fields
+  try {
+    const { data, status } = await axios.post(
+      AA_NEW_API,
+      { asset: "campaign", fields: ["id", "company", "url"] },
+      { headers: { Authorization: getBasicAuth(), "Content-Type": "application/json" } }
+    );
+    results.new_api_with_fields = { status, data: typeof data === "object" ? data : "non-object" };
+  } catch (err) {
+    results.new_api_with_fields = { error: err.response?.status, message: err.response?.data || err.message };
+  }
+
+  return results;
+}
+
+/**
+ * Match accounts to AA campaigns and fetch performance data.
  */
 async function fetchPerformanceForAccounts(accounts) {
   if (!accounts || accounts.length === 0) return [];
@@ -64,15 +164,10 @@ async function fetchPerformanceForAccounts(accounts) {
   const results = [];
 
   for (const account of accounts) {
-    // Approximate match: case-insensitive includes
     const clientName = (account.client_name || "").toLowerCase();
     const matched = campaigns.find((c) => {
       const company = (c.company || "").toLowerCase();
-      return (
-        company.includes(clientName) ||
-        clientName.includes(company) ||
-        levenshteinClose(company, clientName)
-      );
+      return company.includes(clientName) || clientName.includes(company);
     });
 
     if (!matched) continue;
@@ -80,7 +175,6 @@ async function fetchPerformanceForAccounts(accounts) {
     try {
       const rankings = await fetchKeywordRankings(matched.id);
 
-      // Summarize: count improved, declined, unchanged
       let improved = 0;
       let declined = 0;
       let unchanged = 0;
@@ -91,7 +185,7 @@ async function fetchPerformanceForAccounts(accounts) {
         const prev = Number(kw.previous_rank) || 0;
         if (prev === 0 || rank === 0) continue;
 
-        const diff = prev - rank; // positive = improved
+        const diff = prev - rank;
         if (diff > 0) improved++;
         else if (diff < 0) declined++;
         else unchanged++;
@@ -106,7 +200,6 @@ async function fetchPerformanceForAccounts(accounts) {
         }
       }
 
-      // Sort by biggest change
       topChanges.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
 
       results.push({
@@ -128,18 +221,4 @@ async function fetchPerformanceForAccounts(accounts) {
   return results;
 }
 
-/**
- * Simple check if two strings are "close enough" (within 3 char edits for short strings).
- */
-function levenshteinClose(a, b) {
-  if (Math.abs(a.length - b.length) > 3) return false;
-  let dist = 0;
-  const maxLen = Math.max(a.length, b.length);
-  for (let i = 0; i < maxLen; i++) {
-    if (a[i] !== b[i]) dist++;
-    if (dist > 3) return false;
-  }
-  return true;
-}
-
-module.exports = { fetchCampaigns, fetchKeywordRankings, fetchPerformanceForAccounts };
+module.exports = { fetchCampaigns, fetchKeywordRankings, fetchPerformanceForAccounts, debugApiConnection };

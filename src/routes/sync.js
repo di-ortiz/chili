@@ -1,7 +1,7 @@
 const { Router } = require("express");
 const { fetchWorkspaceStructure, syncClickUpToAccounts } = require("../collectors/clickup-sync");
 const { checkAACoverage } = require("../collectors/aa-coverage");
-const { fetchCampaigns } = require("../collectors/agencyanalytics");
+const { fetchCampaigns, debugApiConnection } = require("../collectors/agencyanalytics");
 
 const router = Router();
 
@@ -51,6 +51,16 @@ router.get("/aa-campaigns", async (_req, res) => {
   try {
     const campaigns = await fetchCampaigns();
     res.json(campaigns);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /sync/aa-debug — Debug AgencyAnalytics API connection
+router.get("/aa-debug", async (_req, res) => {
+  try {
+    const result = await debugApiConnection();
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
