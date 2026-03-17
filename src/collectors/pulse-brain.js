@@ -3,13 +3,13 @@ const supabase = require("../db/supabase");
 
 const client = new Anthropic();
 
-const SYSTEM_PROMPT = `You are Sofia, the AI briefing assistant for Chili Digital. You send daily WhatsApp briefings to team leaders with actionable intelligence about their accounts.
+const MORNING_SYSTEM_PROMPT = `You are Sofia, the AI briefing assistant for Chili Digital. You send daily morning WhatsApp briefings to team leaders with actionable intelligence about their accounts.
 
-Write in the leader's language based on their BU: BR = Portuguese, PA_MX = Spanish, INT = English.
+Write in the leader's language based on their BU: BR = Portuguese, PA_MX = Spanish, INT = English. If BU contains multiple (e.g. "BR,INT,PA_MX"), default to English.
 
 Format for WhatsApp: use *bold* for headers and key numbers, emojis sparingly but effectively. Max 600 words.
 
-Your briefing MUST follow this exact structure:
+Your MORNING briefing MUST follow this exact structure:
 
 1. *PORTFOLIO OVERVIEW*
    - X active accounts on ClickUp vs Y accounts on AgencyAnalytics
@@ -18,8 +18,8 @@ Your briefing MUST follow this exact structure:
 2. *TASKS & PRIORITIES*
    - Total open tasks: X | Overdue: Y | Due soon: Z
    - Group by tier priority (honeymoon first, then escalation, enterprise, SMB)
-   - For each tier with issues, list the overdue/urgent tasks with client name
-   - Be specific: "OVERDUE: [Task Name] for [Client] - due [date]"
+   - For each tier with issues, list the overdue/urgent tasks with client name and who is assigned
+   - Be specific: "OVERDUE: [Task Name] for [Client] - due [date] - assigned to [person]"
 
 3. *CONTRACTUAL DELIVERABLES*
    - Flag missing or potentially late contractual tasks
@@ -45,8 +45,34 @@ Your briefing MUST follow this exact structure:
 
 Be direct, not verbose. Every sentence should be actionable or informative. No fluff.`;
 
+const EVENING_SYSTEM_PROMPT = `You are Sofia, the AI briefing assistant for Chili Digital. You send daily evening WhatsApp briefings summarizing what was accomplished during the day.
+
+Write in the leader's language based on their BU: BR = Portuguese, PA_MX = Spanish, INT = English. If BU contains multiple (e.g. "BR,INT,PA_MX"), default to English.
+
+Format for WhatsApp: use *bold* for headers and key numbers, emojis sparingly but effectively. Max 400 words.
+
+Your EVENING briefing MUST follow this exact structure:
+
+1. *DAY RECAP*
+   - Tasks completed today vs tasks that were open this morning
+   - Highlight who completed what (by assignee)
+   - Flag tasks that were overdue this morning and are STILL overdue
+
+2. *PROGRESS SCORE*
+   - Give a simple score: X tasks completed out of Y that were due/overdue
+   - Call out wins (completed on time) and concerns (still pending)
+
+3. *STILL PENDING*
+   - List remaining overdue tasks with owner and client
+   - These carry over to tomorrow's morning briefing
+
+4. *TOMORROW'S PRIORITIES*
+   - Based on what's still pending + what's coming due tomorrow
+   - Flag any meetings scheduled for tomorrow
+
+Be concise and celebratory where earned, direct about what fell behind.`;
+
 function buildUserPrompt({ leader, tasks, taskSummary, events, performance, coverageGap, contractualFlags, accounts }) {
-  // Task details by tier
   const tierOrder = ["honeymoon", "escalation", "enterprise", "smb"];
   let taskDetails = "";
   if (taskSummary) {
@@ -74,7 +100,6 @@ TASKS BY TIER PRIORITY:\n`;
     }
   }
 
-  // Coverage gap
   let coverageDetails = "COVERAGE GAP DATA NOT AVAILABLE";
   if (coverageGap) {
     coverageDetails = `PORTFOLIO COVERAGE:
@@ -89,10 +114,8 @@ TASKS BY TIER PRIORITY:\n`;
     }
   }
 
-  // Calendar events
   let eventDetails = "No calendar data available.";
   if (events && events.length > 0) {
-    // Group by day
     const byDay = {};
     for (const e of events) {
       const day = e.start ? e.start.split("T")[0] : "unknown";
@@ -111,7 +134,6 @@ TASKS BY TIER PRIORITY:\n`;
     eventDetails = "WEEKLY CALENDAR:\nNo meetings scheduled this week.";
   }
 
-  // Performance data
   let perfDetails = "No performance data available.";
   if (performance && performance.length > 0) {
     perfDetails = "CLIENT PERFORMANCE (AgencyAnalytics):\n" +
@@ -130,7 +152,6 @@ TASKS BY TIER PRIORITY:\n`;
         .join("\n");
   }
 
-  // Contractual compliance flags
   let contractDetails = "No contractual compliance data.";
   if (contractualFlags && contractualFlags.length > 0) {
     contractDetails = "CONTRACTUAL COMPLIANCE FLAGS:\n" +
@@ -147,7 +168,6 @@ TASKS BY TIER PRIORITY:\n`;
         .join("\n");
   }
 
-  // Account list
   const accountList = (accounts || [])
     .map((a) => `- ${a.client_name || a.name} | Service: ${a.service_type || "unknown"} | Tier: ${a.tier || "unknown"}`)
     .join("\n");
@@ -170,8 +190,62 @@ ${perfDetails}
 Remember: Prioritize honeymoon and escalation accounts. Be specific about what needs attention today. End with 3 clear actions.`;
 }
 
+function buildEveningPrompt({ leader, morningSnapshot, currentData }) {
+  const morning = morningSnapshot || {};
+  const current = currentData || {};
+
+  const morningOverdue = morning.totalOverdue || 0;
+  const morningOpen = morning.totalOpen || 0;
+  const currentOverdue = current.taskSummary?.totalOverdue || 0;
+  const currentOpen = current.taskSummary?.totalOpen || 0;
+
+  const completed = morningOpen > currentOpen ? morningOpen - currentOpen : 0;
+  const resolvedOverdue = morningOverdue > currentOverdue ? morningOverdue - currentOverdue : 0;
+
+  // List still-overdue tasks
+  const stillOverdue = (current.tasks?.overdue || [])
+    .map((t) => `- ${t.name} | Client: ${t.list_name} | Assigned: ${(t.assignees || []).join(", ") || "unassigned"} | Due: ${t.due_date}`)
+    .join("\n") || "None";
+
+  // Tomorrow's events
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split("T")[0];
+  const tomorrowEvents = (current.events || [])
+    .filter((e) => e.start && e.start.startsWith(tomorrowStr))
+    .map((e) => `- ${e.start.split("T")[1]?.slice(0, 5)} ${e.title}`)
+    .join("\n") || "No meetings tomorrow";
+
+  // Tasks due tomorrow
+  const tomorrowTasks = (current.tasks?.dueSoon || [])
+    .filter((t) => t.due_date && t.due_date.startsWith(tomorrowStr))
+    .map((t) => `- ${t.name} | Client: ${t.list_name} | Assigned: ${(t.assignees || []).join(", ") || "unassigned"}`)
+    .join("\n") || "No tasks due tomorrow";
+
+  return `Generate the EVENING recap for ${leader.name}, ${leader.bu} team leader.
+
+MORNING vs NOW:
+- Morning open tasks: ${morningOpen}
+- Current open tasks: ${currentOpen}
+- Tasks completed today: ${completed}
+- Morning overdue: ${morningOverdue}
+- Current overdue: ${currentOverdue}
+- Overdue tasks resolved: ${resolvedOverdue}
+
+STILL OVERDUE:
+${stillOverdue}
+
+TOMORROW'S MEETINGS:
+${tomorrowEvents}
+
+TASKS DUE TOMORROW:
+${tomorrowTasks}
+
+Be concise. Celebrate completions, flag what's still pending.`;
+}
+
 /**
- * Generate a briefing for a leader using Claude and log it to Supabase.
+ * Generate a morning briefing for a leader.
  */
 async function generateBriefing(collectedData) {
   const userPrompt = buildUserPrompt(collectedData);
@@ -179,7 +253,7 @@ async function generateBriefing(collectedData) {
   const message = await client.messages.create({
     model: "claude-haiku-4-5-20251001",
     max_tokens: 2048,
-    system: SYSTEM_PROMPT,
+    system: MORNING_SYSTEM_PROMPT,
     messages: [{ role: "user", content: userPrompt }],
   });
 
@@ -188,13 +262,20 @@ async function generateBriefing(collectedData) {
     .map((block) => block.text)
     .join("\n");
 
-  // Log to briefing_logs
+  // Log to briefing_logs with morning snapshot for evening comparison
+  const snapshot = {
+    totalOpen: collectedData.taskSummary?.totalOpen || 0,
+    totalOverdue: collectedData.taskSummary?.totalOverdue || 0,
+    totalDueSoon: collectedData.taskSummary?.totalDueSoon || 0,
+  };
+
   const { data: logEntry, error } = await supabase
     .from("briefing_logs")
     .insert({
       leader_id: collectedData.leader.id,
       content: briefingText,
-      status: "generated",
+      status: "morning",
+      morning_snapshot: snapshot,
     })
     .select("id")
     .single();
@@ -206,4 +287,63 @@ async function generateBriefing(collectedData) {
   return { text: briefingText, logId: logEntry?.id || null };
 }
 
-module.exports = { generateBriefing };
+/**
+ * Generate an evening briefing comparing morning state vs current state.
+ */
+async function generateEveningBriefing(collectedData) {
+  // Get this morning's snapshot
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const { data: morningLog } = await supabase
+    .from("briefing_logs")
+    .select("morning_snapshot")
+    .eq("leader_id", collectedData.leader.id)
+    .eq("status", "morning")
+    .gte("generated_at", today.toISOString())
+    .order("generated_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  const morningSnapshot = morningLog?.morning_snapshot || {
+    totalOpen: 0,
+    totalOverdue: 0,
+    totalDueSoon: 0,
+  };
+
+  const userPrompt = buildEveningPrompt({
+    leader: collectedData.leader,
+    morningSnapshot,
+    currentData: collectedData,
+  });
+
+  const message = await client.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 1024,
+    system: EVENING_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: userPrompt }],
+  });
+
+  const briefingText = message.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+
+  const { data: logEntry, error } = await supabase
+    .from("briefing_logs")
+    .insert({
+      leader_id: collectedData.leader.id,
+      content: briefingText,
+      status: "evening",
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    console.error("Failed to log evening briefing:", error.message);
+  }
+
+  return { text: briefingText, logId: logEntry?.id || null };
+}
+
+module.exports = { generateBriefing, generateEveningBriefing };

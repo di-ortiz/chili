@@ -1,7 +1,7 @@
 const { Router } = require("express");
 const supabase = require("../db/supabase");
 const { collectDataForLeader } = require("../collectors/pulse-collector");
-const { generateBriefing } = require("../collectors/pulse-brain");
+const { generateBriefing, generateEveningBriefing } = require("../collectors/pulse-brain");
 const { sendWhatsAppBriefing } = require("../collectors/pulse-delivery");
 
 const router = Router();
@@ -246,6 +246,83 @@ router.get("/send", async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
+// GET /test/send-evening?leader=Hannah&whatsapp=447393056612
+// Send an evening recap briefing for a specific leader
+router.get("/send-evening", async (req, res) => {
+  try {
+    const { leader: leaderName, whatsapp } = req.query;
+
+    if (!leaderName) {
+      return res.status(400).json({ error: "Missing ?leader= parameter" });
+    }
+
+    const { data: leaders } = await supabase
+      .from("team_leaders")
+      .select("*")
+      .ilike("name", leaderName);
+
+    if (!leaders || leaders.length === 0) {
+      return res.status(404).json({ error: `Leader "${leaderName}" not found` });
+    }
+
+    const leader = leaders[0];
+    const targetWhatsapp = whatsapp || leader.whatsapp;
+
+    leader.calendar_emails = leader.email ? [leader.email] : [];
+
+    const collectedData = await collectDataForLeader(leader);
+    const { text, logId } = await generateEveningBriefing(collectedData);
+
+    let whatsappSent = false;
+    if (targetWhatsapp) {
+      whatsappSent = await sendWhatsAppBriefing(targetWhatsapp, text, logId);
+    }
+
+    res.json({
+      leader: { id: leader.id, name: leader.name, bu: leader.bu },
+      sent_to: targetWhatsapp,
+      briefing: text,
+      delivered: { whatsapp: whatsappSent },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
+// GET /test/send-all — Send morning briefing to ALL active leaders
+router.get("/send-all", async (req, res) => {
+  try {
+    const { data: leaders, error } = await supabase
+      .from("team_leaders")
+      .select("*")
+      .eq("active", true);
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    const results = [];
+    for (const leader of leaders) {
+      try {
+        leader.calendar_emails = leader.email ? [leader.email] : [];
+        const collectedData = await collectDataForLeader(leader);
+        const { text, logId } = await generateBriefing(collectedData);
+
+        let whatsappSent = false;
+        if (leader.whatsapp) {
+          whatsappSent = await sendWhatsAppBriefing(leader.whatsapp, text, logId);
+        }
+
+        results.push({ name: leader.name, whatsapp: leader.whatsapp, sent: whatsappSent });
+      } catch (err) {
+        results.push({ name: leader.name, error: err.message });
+      }
+    }
+
+    res.json({ total_leaders: leaders.length, results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
