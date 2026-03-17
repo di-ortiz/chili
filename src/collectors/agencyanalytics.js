@@ -1,8 +1,6 @@
 const axios = require("axios");
 
-// Try both the new API and legacy v3
-const AA_NEW_API = "https://apirequest.app/query";
-const AA_V3_API = "https://api.clientseoreport.com/v3";
+const AA_API = "https://apirequest.app/query";
 
 function getApiKey() {
   const apiKey = process.env.AGENCYANALYTICS_API_KEY;
@@ -15,152 +13,95 @@ function getBasicAuth() {
   return `Basic ${encoded}`;
 }
 
+function getHeaders() {
+  return { Authorization: getBasicAuth(), "Content-Type": "application/json" };
+}
+
 /**
- * Try the legacy v3 REST API first, fall back to new query API.
+ * Fetch all campaigns via the AgencyAnalytics query API.
+ * Paginates through all results (50 per page).
  */
 async function fetchCampaigns() {
-  // Try v3 API first: GET /campaigns
-  try {
-    const { data } = await axios.get(`${AA_V3_API}/campaigns`, {
-      headers: { Authorization: getBasicAuth() },
-    });
-    const campaigns = data.data || data.campaigns || data || [];
-    if (Array.isArray(campaigns) && campaigns.length > 0) {
-      console.log(`[agencyanalytics] v3 API returned ${campaigns.length} campaigns`);
-      return campaigns;
-    }
-  } catch (err) {
-    console.log(`[agencyanalytics] v3 API failed: ${err.response?.status || err.message}`);
-  }
+  const allCampaigns = [];
+  let offset = 0;
+  const limit = 50;
 
-  // Try new query API
-  try {
+  while (true) {
     const { data } = await axios.post(
-      AA_NEW_API,
-      { asset: "campaign" },
-      { headers: { Authorization: getBasicAuth(), "Content-Type": "application/json" } }
+      AA_API,
+      {
+        provider: "agency-analytics-v2",
+        asset: "campaign",
+        operation: "read",
+        sort: [{ id: "desc" }],
+        offset,
+        limit,
+      },
+      { headers: getHeaders() }
     );
-    const campaigns = data.data || data || [];
-    if (Array.isArray(campaigns)) {
-      console.log(`[agencyanalytics] New API returned ${campaigns.length} campaigns`);
-      return campaigns;
-    }
-  } catch (err) {
-    console.log(`[agencyanalytics] New API failed: ${err.response?.status || err.message}`);
+
+    const rows = data?.results?.rows || [];
+    allCampaigns.push(...rows);
+
+    const totalRecords = data?.results?.metadata?.total_records || 0;
+    console.log(`[agencyanalytics] Fetched ${allCampaigns.length}/${totalRecords} campaigns`);
+
+    if (allCampaigns.length >= totalRecords || rows.length < limit) break;
+    offset += limit;
   }
 
-  // Try new API with different body formats
-  const formats = [
-    { query: "campaign" },
-    { model: "campaign" },
-    { type: "campaign", action: "list" },
-  ];
-
-  for (const body of formats) {
-    try {
-      const { data } = await axios.post(AA_NEW_API, body, {
-        headers: { Authorization: getBasicAuth(), "Content-Type": "application/json" },
-      });
-      const campaigns = data.data || data || [];
-      if (Array.isArray(campaigns) && campaigns.length > 0) {
-        console.log(`[agencyanalytics] Format ${JSON.stringify(body)} worked: ${campaigns.length} campaigns`);
-        return campaigns;
-      }
-    } catch (err) {
-      // continue trying
-    }
-  }
-
-  throw new Error("All AgencyAnalytics API formats failed. Check your API key and plan.");
+  // Filter to active, real campaigns only
+  return allCampaigns.filter((c) => c.status === "active" && c.type === "real");
 }
 
 /**
  * Fetch keyword rankings for a specific campaign.
  */
 async function fetchKeywordRankings(campaignId) {
-  // Try v3 first
-  try {
-    const { data } = await axios.get(`${AA_V3_API}/campaigns/${campaignId}/keyword-rankings`, {
-      headers: { Authorization: getBasicAuth() },
-    });
-    return data.data || data || [];
-  } catch (err) {
-    console.log(`[agencyanalytics] v3 keyword-rankings failed: ${err.response?.status}`);
-  }
-
-  // Try new API
   try {
     const { data } = await axios.post(
-      AA_NEW_API,
-      { asset: "keyword-rankings", filters: { campaign_id: campaignId } },
-      { headers: { Authorization: getBasicAuth(), "Content-Type": "application/json" } }
+      AA_API,
+      {
+        provider: "agency-analytics-v2",
+        asset: "keyword",
+        operation: "read",
+        filter: [{ campaign_id: campaignId }],
+        sort: [{ id: "desc" }],
+        limit: 200,
+      },
+      { headers: getHeaders() }
     );
-    return data.data || data || [];
+    return data?.results?.rows || [];
   } catch (err) {
-    console.log(`[agencyanalytics] New API keyword-rankings failed: ${err.response?.status}`);
+    console.log(`[agencyanalytics] keyword rankings failed for campaign ${campaignId}: ${err.response?.status || err.message}`);
     return [];
   }
 }
 
 /**
- * Debug endpoint: try all API formats and return what works.
+ * Debug endpoint: test API connection and list available assets.
  */
 async function debugApiConnection() {
   const results = {};
-  const headers = { Authorization: getBasicAuth(), "Content-Type": "application/json" };
 
-  // Try various body formats for the new API
-  const attempts = [
-    {
-      name: "campaign_list",
-      body: { connector: "agencyanalytics", provider: "agencyanalytics", operation: "list", asset: "campaign" },
-    },
-    {
-      name: "campaign_read",
-      body: { connector: "agencyanalytics", provider: "agencyanalytics", operation: "read", asset: "campaign" },
-    },
-    {
-      name: "campaign_get",
-      body: { connector: "agencyanalytics", provider: "agencyanalytics", operation: "get", asset: "campaign" },
-    },
-    {
-      name: "core_list",
-      body: { connector: "core", provider: "core", operation: "list", asset: "campaign" },
-    },
-    {
-      name: "platform_list",
-      body: { connector: "platform", provider: "platform", operation: "list", asset: "campaign" },
-    },
-    {
-      name: "internal_list",
-      body: { connector: "internal", provider: "internal", operation: "list", asset: "campaign" },
-    },
-    {
-      name: "aa_list",
-      body: { connector: "aa", provider: "aa", operation: "list", asset: "campaign" },
-    },
-    {
-      name: "user_list",
-      body: { connector: "agencyanalytics", provider: "agencyanalytics", operation: "list", asset: "user" },
-    },
-    {
-      name: "campaign_index",
-      body: { connector: "agencyanalytics", provider: "agencyanalytics", operation: "index", asset: "campaign" },
-    },
-  ];
-
-  for (const attempt of attempts) {
+  const assets = ["campaign", "keyword", "campaign_group", "integration"];
+  for (const asset of assets) {
     try {
-      const { data, status } = await axios.post(AA_NEW_API, attempt.body, { headers });
-      results[attempt.name] = {
+      const { data, status } = await axios.post(
+        AA_API,
+        { provider: "agency-analytics-v2", asset, operation: "read", limit: 1 },
+        { headers: getHeaders() }
+      );
+      results[asset] = {
         status,
         success: true,
-        sample: JSON.stringify(data).slice(0, 300),
+        total_records: data?.results?.metadata?.total_records,
+        sample: data?.results?.rows?.[0] ? Object.keys(data.results.rows[0]) : [],
       };
     } catch (err) {
-      results[attempt.name] = {
+      results[asset] = {
         error: err.response?.status,
-        message: err.response?.data?.results?.messages || err.response?.data || err.message,
+        message: err.response?.data?.results?.messages || err.message,
       };
     }
   }
