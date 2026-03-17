@@ -40,8 +40,8 @@ async function collectDataForLeader(leader, options = {}) {
 
   // Fetch all data sources in parallel, each with graceful error handling
   const [allTasks, events, performance, aaCampaigns] = await Promise.all([
-    listIds.length > 0 && leader.clickup_user_id
-      ? fetchAllTasks(listIds, leader.clickup_user_id).catch((err) => {
+    listIds.length > 0
+      ? fetchAllTasks(listIds).catch((err) => {
           console.error(`[pulse-collector] ClickUp error: ${err.message}`);
           return { overdue: [], dueSoon: [], allOpen: [] };
         })
@@ -116,7 +116,7 @@ async function fetchAllCalendars(emails) {
 /**
  * Fetch ALL open tasks (not just overdue) for richer analysis.
  */
-async function fetchAllTasks(listIds, clickupUserId) {
+async function fetchAllTasks(listIds) {
   const axios = require("axios");
   const token = process.env.CLICKUP_API_TOKEN;
   if (!token) return { overdue: [], dueSoon: [], allOpen: [] };
@@ -134,7 +134,6 @@ async function fetchAllTasks(listIds, clickupUserId) {
     try {
       const { data } = await client.get(`/list/${listId}/task`, {
         params: {
-          assignees: [clickupUserId],
           statuses: [],
           include_closed: false,
           subtasks: true,
@@ -157,6 +156,7 @@ async function fetchAllTasks(listIds, clickupUserId) {
           priority: task.priority?.priority || "none",
           status: task.status?.status || "unknown",
           list_name: task.list?.name || null,
+          assignees: (task.assignees || []).map((a) => a.username || a.email || "unassigned"),
           url: task.url,
         }));
 

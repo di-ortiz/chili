@@ -60,10 +60,10 @@ TASKS BY TIER PRIORITY:\n`;
       const group = taskSummary.byTier[tier];
       if (!group) continue;
       const overdueList = group.overdue
-        .map((t) => `  OVERDUE: ${t.name} | Due: ${t.due_date} | Priority: ${t.priority} | Client: ${t.list_name} | ${t.url}`)
+        .map((t) => `  OVERDUE: ${t.name} | Due: ${t.due_date} | Priority: ${t.priority} | Client: ${t.list_name} | Assigned: ${(t.assignees || []).join(", ") || "unassigned"} | ${t.url}`)
         .join("\n");
       const dueSoonList = group.dueSoon
-        .map((t) => `  DUE SOON: ${t.name} | Due: ${t.due_date} | Priority: ${t.priority} | Client: ${t.list_name} | ${t.url}`)
+        .map((t) => `  DUE SOON: ${t.name} | Due: ${t.due_date} | Priority: ${t.priority} | Client: ${t.list_name} | Assigned: ${(t.assignees || []).join(", ") || "unassigned"} | ${t.url}`)
         .join("\n");
       if (overdueList || dueSoonList) {
         taskDetails += `\n[${tier.toUpperCase()}]\n${overdueList}\n${dueSoonList}\n`;
