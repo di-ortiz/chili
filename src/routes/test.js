@@ -131,27 +131,29 @@ router.get("/sofia", async (req, res) => {
       sofia.whatsapp = OWNER_WHATSAPP;
     }
 
-    // Step 2: Assign ALL active accounts to Sofia (she covers all BUs)
+    // Step 2: Read ALL active accounts (Sofia has visibility into everything, doesn't change ownership)
     const { data: allActive } = await supabase
       .from("accounts")
       .select("*")
       .eq("active", true);
 
-    if (allActive && allActive.length > 0) {
-      // Assign any unassigned or reassign all to Sofia
-      for (const acct of allActive) {
-        if (acct.leader_id !== sofia.id) {
-          await supabase
-            .from("accounts")
-            .update({ leader_id: sofia.id })
-            .eq("id", acct.id);
-        }
-      }
-    }
     const accounts = allActive || [];
 
-    // Step 3: Collect data
-    const collectedData = await collectDataForLeader(sofia);
+    // Step 2b: Get all team members' emails for calendar aggregation
+    const { data: allLeaders } = await supabase
+      .from("team_leaders")
+      .select("email")
+      .eq("active", true);
+
+    const calendarEmails = (allLeaders || [])
+      .map((l) => l.email)
+      .filter((e) => e && e.endsWith("@chili.pa"));
+
+    // Attach calendar emails to sofia for the collector
+    sofia.calendar_emails = calendarEmails;
+
+    // Step 3: Collect data (pass all accounts without changing ownership)
+    const collectedData = await collectDataForLeader(sofia, { accounts });
 
     // Step 4: Generate briefing
     const { text, logId } = await generateBriefing(collectedData);

@@ -7,18 +7,36 @@ const { SEO_TASKS, PPC_TASKS } = require("../config/contractual-tasks");
 /**
  * Collect all briefing data for a given leader.
  * Returns enriched data: tasks, events, performance, coverage gap, contractual compliance.
+ *
+ * @param {object} leader - A team_leaders row
+ * @param {object} [options]
+ * @param {Array}  [options.accounts] - Override accounts (e.g. pass all accounts for Sofia)
  */
-async function collectDataForLeader(leader) {
-  // Get the leader's active accounts
-  const { data: accounts, error } = await supabase
-    .from("accounts")
-    .select("*")
-    .eq("leader_id", leader.id)
-    .eq("active", true);
+async function collectDataForLeader(leader, options = {}) {
+  let accounts;
 
-  if (error) throw new Error(`Failed to fetch accounts: ${error.message}`);
+  if (options.accounts) {
+    // Use provided accounts (Sofia mode: read-only view of all accounts)
+    accounts = options.accounts;
+  } else {
+    // Normal mode: fetch leader's own accounts
+    const { data, error } = await supabase
+      .from("accounts")
+      .select("*")
+      .eq("leader_id", leader.id)
+      .eq("active", true);
+    if (error) throw new Error(`Failed to fetch accounts: ${error.message}`);
+    accounts = data;
+  }
 
   const listIds = accounts.map((a) => a.clickup_list_id).filter(Boolean);
+
+  // Determine which emails to fetch calendars for
+  const calendarEmails = leader.calendar_emails
+    ? leader.calendar_emails
+    : leader.email
+      ? [leader.email]
+      : [];
 
   // Fetch all data sources in parallel, each with graceful error handling
   const [allTasks, events, performance, aaCampaigns] = await Promise.all([
@@ -28,8 +46,8 @@ async function collectDataForLeader(leader) {
           return { overdue: [], dueSoon: [], allOpen: [] };
         })
       : { overdue: [], dueSoon: [], allOpen: [] },
-    leader.email
-      ? fetchEvents(leader.email).catch((err) => {
+    calendarEmails.length > 0
+      ? fetchAllCalendars(calendarEmails).catch((err) => {
           console.error(`[pulse-collector] Calendar error: ${err.message}`);
           return [];
         })
@@ -67,6 +85,32 @@ async function collectDataForLeader(leader) {
     leader,
     accounts,
   };
+}
+
+/**
+ * Fetch calendar events from multiple @chili.pa emails, deduplicated.
+ */
+async function fetchAllCalendars(emails) {
+  const allEvents = [];
+  const seenIds = new Set();
+
+  for (const email of emails) {
+    try {
+      const events = await fetchEvents(email);
+      for (const event of events) {
+        if (!seenIds.has(event.id)) {
+          seenIds.add(event.id);
+          allEvents.push(event);
+        }
+      }
+    } catch (err) {
+      console.error(`[pulse-collector] Calendar error for ${email}: ${err.message}`);
+    }
+  }
+
+  // Sort by start time
+  allEvents.sort((a, b) => new Date(a.start) - new Date(b.start));
+  return allEvents;
 }
 
 /**
