@@ -31,13 +31,16 @@ async function fetchEvents(email) {
 
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const endOfTomorrow = new Date(startOfToday);
-  endOfTomorrow.setDate(endOfTomorrow.getDate() + 2);
+  // Fetch through end of current work week (Friday)
+  const dayOfWeek = startOfToday.getDay(); // 0=Sun, 1=Mon...
+  const daysUntilFriday = dayOfWeek <= 5 ? 5 - dayOfWeek : 0;
+  const endOfWeek = new Date(startOfToday);
+  endOfWeek.setDate(endOfWeek.getDate() + daysUntilFriday + 1); // +1 to include Friday
 
   const { data } = await calendar.events.list({
     calendarId: email,
     timeMin: startOfToday.toISOString(),
-    timeMax: endOfTomorrow.toISOString(),
+    timeMax: endOfWeek.toISOString(),
     singleEvents: true,
     orderBy: "startTime",
   });

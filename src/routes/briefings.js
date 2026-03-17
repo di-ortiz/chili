@@ -68,9 +68,15 @@ router.post("/:leader_id/generate", async (req, res) => {
 
     res.json({
       briefing: text,
-      tasks: collectedData.tasks.length,
+      tasks: {
+        total_open: collectedData.taskSummary?.totalOpen || 0,
+        overdue: collectedData.taskSummary?.totalOverdue || 0,
+        due_soon: collectedData.taskSummary?.totalDueSoon || 0,
+      },
       events: collectedData.events.length,
+      coverage_gap: collectedData.coverageGap,
       clients_with_performance: collectedData.performance.length,
+      contractual_flags: collectedData.contractualFlags?.length || 0,
       delivered: { whatsapp: whatsappSent },
     });
   } catch (err) {
