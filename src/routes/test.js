@@ -184,4 +184,69 @@ router.get("/sofia", async (req, res) => {
   }
 });
 
+// GET /test/send?leader=Hannah&whatsapp=447393056612
+// Send a briefing for a specific leader to a specific WhatsApp number
+router.get("/send", async (req, res) => {
+  try {
+    const { leader: leaderName, whatsapp } = req.query;
+
+    if (!leaderName) {
+      return res.status(400).json({ error: "Missing ?leader= parameter" });
+    }
+
+    // Find leader by name (case-insensitive)
+    const { data: leaders } = await supabase
+      .from("team_leaders")
+      .select("*")
+      .ilike("name", leaderName);
+
+    if (!leaders || leaders.length === 0) {
+      return res.status(404).json({ error: `Leader "${leaderName}" not found` });
+    }
+
+    const leader = leaders[0];
+    const targetWhatsapp = whatsapp || leader.whatsapp;
+
+    if (!targetWhatsapp) {
+      return res.status(400).json({ error: "No WhatsApp number provided and leader has none on file" });
+    }
+
+    // Get leader's calendar emails (their own + team if needed)
+    const { data: allLeaders } = await supabase
+      .from("team_leaders")
+      .select("email")
+      .eq("active", true);
+
+    // Leader sees their own calendar
+    leader.calendar_emails = leader.email ? [leader.email] : [];
+
+    // Collect data for this leader's accounts
+    const collectedData = await collectDataForLeader(leader);
+
+    // Generate briefing
+    const { text, logId } = await generateBriefing(collectedData);
+
+    // Send via WhatsApp
+    const whatsappSent = await sendWhatsAppBriefing(targetWhatsapp, text, logId);
+
+    res.json({
+      leader: { id: leader.id, name: leader.name, email: leader.email, bu: leader.bu },
+      sent_to: targetWhatsapp,
+      data_collected: {
+        accounts: collectedData.accounts?.length || 0,
+        tasks_open: collectedData.taskSummary?.totalOpen || 0,
+        tasks_overdue: collectedData.taskSummary?.totalOverdue || 0,
+        tasks_due_soon: collectedData.taskSummary?.totalDueSoon || 0,
+        events: collectedData.events.length,
+        performance: collectedData.performance.length,
+        contractual_flags: collectedData.contractualFlags?.length || 0,
+      },
+      briefing: text,
+      delivered: { whatsapp: whatsappSent },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message, stack: err.stack });
+  }
+});
+
 module.exports = router;
