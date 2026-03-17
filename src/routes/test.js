@@ -131,31 +131,24 @@ router.get("/sofia", async (req, res) => {
       sofia.whatsapp = OWNER_WHATSAPP;
     }
 
-    // Step 2: Ensure Sofia has accounts assigned
-    let { data: accounts } = await supabase
+    // Step 2: Assign ALL active accounts to Sofia (she covers all BUs)
+    const { data: allActive } = await supabase
       .from("accounts")
       .select("*")
-      .eq("leader_id", sofia.id)
       .eq("active", true);
 
-    if (!accounts || accounts.length === 0) {
-      // Assign first 10 active accounts to Sofia
-      const { data: available } = await supabase
-        .from("accounts")
-        .select("*")
-        .eq("active", true)
-        .limit(10);
-
-      if (available && available.length > 0) {
-        for (const acct of available) {
+    if (allActive && allActive.length > 0) {
+      // Assign any unassigned or reassign all to Sofia
+      for (const acct of allActive) {
+        if (acct.leader_id !== sofia.id) {
           await supabase
             .from("accounts")
             .update({ leader_id: sofia.id })
             .eq("id", acct.id);
         }
-        accounts = available;
       }
     }
+    const accounts = allActive || [];
 
     // Step 3: Collect data
     const collectedData = await collectDataForLeader(sofia);
