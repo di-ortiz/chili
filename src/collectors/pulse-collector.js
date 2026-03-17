@@ -24,16 +24,26 @@ async function collectDataForLeader(leader) {
     .filter(Boolean);
 
   // Fetch ClickUp tasks, Google Calendar events, and AA performance in parallel
+  // Each collector catches its own errors so one failure doesn't block the others
   const [tasks, events, performance] = await Promise.all([
     listIds.length > 0 && leader.clickup_user_id
-      ? fetchTasks(listIds, leader.clickup_user_id)
-      : Promise.resolve([]),
+      ? fetchTasks(listIds, leader.clickup_user_id).catch((err) => {
+          console.error(`[pulse-collector] ClickUp error: ${err.message}`);
+          return [];
+        })
+      : [],
     leader.email
-      ? fetchEvents(leader.email)
-      : Promise.resolve([]),
+      ? fetchEvents(leader.email).catch((err) => {
+          console.error(`[pulse-collector] Calendar error: ${err.message}`);
+          return [];
+        })
+      : [],
     process.env.AGENCYANALYTICS_API_KEY
-      ? fetchPerformanceForAccounts(accounts)
-      : Promise.resolve([]),
+      ? fetchPerformanceForAccounts(accounts).catch((err) => {
+          console.error(`[pulse-collector] AA error: ${err.message}`);
+          return [];
+        })
+      : [],
   ]);
 
   return { tasks, events, performance, leader };
