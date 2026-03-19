@@ -96,6 +96,40 @@ async function processAndReply(senderNumber, messageText, waMessageId) {
 }
 
 /**
+ * POST /webhook/owner — Accept forwarded owner messages from No-Touch Agency.
+ *
+ * No-Touch forwards the owner's WhatsApp messages here so Chili Pulse's Sofia
+ * (which has ClickUp, accounts, briefings tools) can handle them.
+ * Returns the AI response text for No-Touch to send back via WhatsApp.
+ */
+router.post("/owner", async (req, res) => {
+  // Simple shared-secret auth so only No-Touch can call this
+  const secret = process.env.CHILI_PULSE_SECRET;
+  if (secret) {
+    const provided = req.headers["x-chili-secret"] || req.query.secret;
+    if (provided !== secret) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+  }
+
+  const { from, body, waMessageId } = req.body;
+
+  if (!from || !body) {
+    return res.status(400).json({ error: "Missing 'from' or 'body'" });
+  }
+
+  console.log(`[webhook/owner] Owner message forwarded from No-Touch: "${body.slice(0, 100)}"`);
+
+  try {
+    const responseText = await handleIncomingMessage(from, body, waMessageId || null);
+    return res.json({ reply: responseText || "" });
+  } catch (err) {
+    console.error("[webhook/owner] Error processing owner message:", err.message);
+    return res.status(500).json({ error: "Failed to process message" });
+  }
+});
+
+/**
  * Send a "read" receipt so the user sees blue checkmarks.
  */
 async function markAsRead(waMessageId) {
