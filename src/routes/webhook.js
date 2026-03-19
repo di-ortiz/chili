@@ -1,8 +1,12 @@
 const express = require("express");
 const axios = require("axios");
 const { handleIncomingMessage } = require("../sofia/conversation");
+const { identifyContact } = require("../sofia/contact-router");
 
 const router = express.Router();
+
+// No-Touch Agency endpoint for client/unknown messages
+const NO_TOUCH_WEBHOOK = "https://no-touch-agency-production.up.railway.app/webhook/whatsapp";
 
 /**
  * GET /webhook — Meta webhook verification.
@@ -42,24 +46,39 @@ router.post("/", async (req, res) => {
     if (!value?.messages) return; // Not a message event (could be status update)
 
     for (const message of value.messages) {
-      // Only handle text messages for now
-      if (message.type !== "text") {
-        console.log(`[webhook] Ignoring non-text message type: ${message.type}`);
-        continue;
-      }
-
       const senderNumber = message.from; // e.g. "5511999999999"
-      const messageText = message.text?.body;
-      const waMessageId = message.id;
 
-      if (!messageText) continue;
+      // Identify contact to decide routing
+      const contact = await identifyContact(senderNumber);
+      const role = contact?.role || "unknown";
 
-      console.log(`[webhook] Incoming from ${senderNumber}: ${messageText.slice(0, 100)}`);
+      console.log(`[webhook] Incoming from ${senderNumber} (role: ${role})`);
 
-      // Process and respond asynchronously (don't block the webhook response)
-      processAndReply(senderNumber, messageText, waMessageId).catch((err) => {
-        console.error(`[webhook] Failed to process message from ${senderNumber}:`, err.message);
-      });
+      if (role === "leader") {
+        // Leaders → handle here in Chili Pulse (ClickUp, briefings, backend)
+        if (message.type !== "text") {
+          console.log(`[webhook] Ignoring non-text message type: ${message.type}`);
+          continue;
+        }
+
+        const messageText = message.text?.body;
+        const waMessageId = message.id;
+        if (!messageText) continue;
+
+        console.log(`[webhook] Processing leader message: ${messageText.slice(0, 100)}`);
+
+        processAndReply(senderNumber, messageText, waMessageId).catch((err) => {
+          console.error(`[webhook] Failed to process message from ${senderNumber}:`, err.message);
+        });
+      } else {
+        // Clients & unknown → forward to No-Touch Agency
+        console.log(`[webhook] Forwarding ${role} message to No-Touch Agency`);
+
+        forwardToNoTouch(req.body).catch((err) => {
+          console.error(`[webhook] Failed to forward to No-Touch Agency:`, err.message);
+        });
+        break; // Full payload forwarded, no need to iterate further
+      }
     }
   } catch (err) {
     console.error("[webhook] Error processing webhook:", err.message);
@@ -110,6 +129,21 @@ async function markAsRead(waMessageId) {
   } catch (err) {
     // Non-critical, don't fail
     console.warn("[webhook] Failed to mark as read:", err.message);
+  }
+}
+
+/**
+ * Forward the raw webhook payload to No-Touch Agency for client-facing handling.
+ */
+async function forwardToNoTouch(payload) {
+  try {
+    await axios.post(NO_TOUCH_WEBHOOK, payload, {
+      headers: { "Content-Type": "application/json" },
+      timeout: 10000,
+    });
+    console.log("[webhook] Successfully forwarded to No-Touch Agency");
+  } catch (err) {
+    console.error("[webhook] No-Touch Agency forward failed:", err.message);
   }
 }
 
