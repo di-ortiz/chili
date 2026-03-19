@@ -5,9 +5,6 @@ const { identifyContact } = require("../sofia/contact-router");
 
 const router = express.Router();
 
-// No-Touch Agency endpoint for client/unknown messages
-const NO_TOUCH_WEBHOOK = "https://no-touch-agency-production.up.railway.app/webhook/whatsapp";
-
 /**
  * GET /webhook — Meta webhook verification.
  * Meta sends a challenge to verify the endpoint.
@@ -29,10 +26,11 @@ router.get("/", (req, res) => {
 });
 
 /**
- * POST /webhook — Receive incoming WhatsApp messages from Meta.
+ * POST /webhook — Receive forwarded WhatsApp payloads from No-Touch Agency.
  *
- * Meta sends a payload like:
- * { entry: [{ changes: [{ value: { messages: [{ from, text, id }] } }] }] }
+ * No-Touch Agency receives the Meta webhook and forwards the raw payload here.
+ * We only process messages from team leaders (Sofia); everything else is ignored
+ * since No-Touch Agency already handles clients independently.
  */
 router.post("/", async (req, res) => {
   // Always respond 200 quickly — Meta retries if we're slow
@@ -71,13 +69,8 @@ router.post("/", async (req, res) => {
           console.error(`[webhook] Failed to process message from ${senderNumber}:`, err.message);
         });
       } else {
-        // Clients & unknown → forward to No-Touch Agency
-        console.log(`[webhook] Forwarding ${role} message to No-Touch Agency`);
-
-        forwardToNoTouch(req.body).catch((err) => {
-          console.error(`[webhook] Failed to forward to No-Touch Agency:`, err.message);
-        });
-        break; // Full payload forwarded, no need to iterate further
+        // Clients & unknown → ignore here, No-Touch Agency handles them
+        console.log(`[webhook] Ignoring ${role} message — handled by No-Touch Agency`);
       }
     }
   } catch (err) {
@@ -132,19 +125,5 @@ async function markAsRead(waMessageId) {
   }
 }
 
-/**
- * Forward the raw webhook payload to No-Touch Agency for client-facing handling.
- */
-async function forwardToNoTouch(payload) {
-  try {
-    await axios.post(NO_TOUCH_WEBHOOK, payload, {
-      headers: { "Content-Type": "application/json" },
-      timeout: 10000,
-    });
-    console.log("[webhook] Successfully forwarded to No-Touch Agency");
-  } catch (err) {
-    console.error("[webhook] No-Touch Agency forward failed:", err.message);
-  }
-}
 
 module.exports = router;
