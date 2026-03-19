@@ -55,7 +55,7 @@ Be brief. One or two sentences max. Match their language if you can detect it.`;
 async function handleIncomingMessage(senderNumber, messageText, waMessageId) {
   // 1. Identify the sender
   const contact = await identifyContact(senderNumber);
-  console.log(`[sofia] Message from ${contact.name || senderNumber} (role: ${contact.role})`);
+  console.log(`[sofia] Message from ${contact.name || senderNumber} (role: ${contact.role}, id: ${contact.id}, leader_id: ${contact.leader_id || "none"})`);
 
   // 2. Save inbound message
   if (contact.id) {
@@ -63,13 +63,28 @@ async function handleIncomingMessage(senderNumber, messageText, waMessageId) {
   }
 
   // 3. Get conversation history for context
-  const history = contact.id ? await getConversationHistory(contact.id, 20) : [];
+  const history = contact.id ? await getConversationHistory(contact.id, 8) : [];
 
   // 4. Build messages array with history
+  // Filter out poisoned assistant messages that refused to use tools (old bug)
+  const TOXIC_PATTERNS = [
+    "I don't have direct integration",
+    "I don't have access to ClickUp",
+    "I can't access ClickUp",
+    "Google Doc",
+    "Google Docs",
+    "formatted document",
+    "copy-paste into ClickUp",
+  ];
   const messages = [];
   for (const msg of history) {
     // Skip the message we just saved (it's the current one)
     if (msg.wa_message_id === waMessageId) continue;
+    // Skip poisoned assistant responses that refused tool use
+    if (msg.direction === "outbound" && TOXIC_PATTERNS.some((p) => msg.message.includes(p))) {
+      console.log(`[sofia] Skipping poisoned history message: "${msg.message.slice(0, 60)}..."`);
+      continue;
+    }
     messages.push({
       role: msg.direction === "inbound" ? "user" : "assistant",
       content: msg.message,
@@ -112,6 +127,7 @@ async function handleIncomingMessage(senderNumber, messageText, waMessageId) {
   }
 
   // 6. Call Claude with tool-use
+  console.log(`[sofia] Calling Claude with ${tools.length} tools, ${messages.length} messages`);
   let response;
   try {
     response = await client.messages.create({
