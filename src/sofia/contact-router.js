@@ -17,6 +17,33 @@ async function identifyContact(whatsappNumber) {
     .single();
 
   if (contact) {
+    // If contact exists but isn't a leader, re-check team_leaders in case they were added since
+    if (contact.role !== "leader" && !contact.leader_id) {
+      const { data: leaders } = await supabase
+        .from("team_leaders")
+        .select("*")
+        .eq("whatsapp", cleaned);
+
+      if (leaders && leaders.length > 0) {
+        const leader = leaders[0];
+        const language = leader.bu === "BR" ? "pt" : leader.bu === "PA_MX" ? "es" : "en";
+
+        // Upgrade contact to leader
+        const { data: updated } = await supabase
+          .from("contacts")
+          .update({ role: "leader", leader_id: leader.id, name: leader.name, language })
+          .eq("id", contact.id)
+          .select("*")
+          .single();
+
+        if (updated) {
+          console.log(`[contact-router] Upgraded contact ${cleaned} from ${contact.role} to leader`);
+          updated.team_leaders = leader;
+          return updated;
+        }
+      }
+    }
+
     return contact;
   }
 
